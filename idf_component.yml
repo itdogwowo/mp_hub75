@@ -1,0 +1,5 @@
+## IDF Component Manager Manifest File
+dependencies:
+  esphome/esp-hub75: "^0.3.6"
+  idf:
+    version: ">=5.0.0"
