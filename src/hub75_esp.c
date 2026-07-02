@@ -7,7 +7,7 @@
 #include "py/runtime.h"
 #include "py/obj.h"
 #include "py/mphal.h"
-#include "src/hub75_bridge.h"
+#include "hub75_bridge.h"
 
 // ── Enum constants ──────────────────────────────────────────
 
