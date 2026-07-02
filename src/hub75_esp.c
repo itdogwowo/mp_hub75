@@ -227,6 +227,9 @@ static void display_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             dest[0] = mp_obj_new_float(hub75_bridge_get_refresh_rate(self->handle));
         } else if (attr == MP_QSTR_is_running) {
             dest[0] = mp_obj_new_bool(hub75_bridge_is_running(self->handle));
+        } else {
+            // Fall through to locals_dict for bound methods.
+            dest[1] = MP_OBJ_SENTINEL;
         }
     }
 }
