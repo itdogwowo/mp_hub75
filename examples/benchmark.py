@@ -72,41 +72,48 @@ def _fill_pattern(buf, width, height, fmt, frame):
 
 def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M):
     """Benchmark a single pixel format."""
-    display = _make_display(width, height, fmt, clock)
-    buf = _make_buf(width, height, fmt)
-    _, bpp = _FORMAT_MAP[fmt]
-    buf_size = width * height * bpp
+    display = None
+    try:
+        display = _make_display(width, height, fmt, clock)
+        buf = _make_buf(width, height, fmt)
+        _, bpp = _FORMAT_MAP[fmt]
+        buf_size = width * height * bpp
 
-    print(f"\n--- {fmt} ({width}x{height}, {clock // 1000000}MHz, {bpp} bytes/px) ---")
-    print(f"Buffer size: {buf_size} bytes")
-    print(f"Approx refresh rate: display.refresh_rate (available after begin())")
+        print(f"\n--- {fmt} ({width}x{height}, {clock // 1000000}MHz, {bpp} bytes/px) ---")
+        print(f"Buffer size: {buf_size} bytes")
+        print(f"Approx refresh rate: display.refresh_rate (available after begin())")
 
-    info = display.buffer_info()
-    print(f"DMA memory: per_buffer={info['dma_per_buffer']}, total={info['total']}")
+        info = display.buffer_info()
+        print(f"DMA memory: per_buffer={info['dma_per_buffer']}, total={info['total']}")
 
-    display.begin()
-    print(f"Refresh rate: {display.refresh_rate:.1f} Hz")
-    print(f"Effective dimensions: {display.width}x{display.height}")
+        display.begin()
+        print(f"Refresh rate: {display.refresh_rate:.1f} Hz")
+        print(f"Effective dimensions: {display.width}x{display.height}")
 
-    # Warmup
-    _fill_pattern(buf, width, height, fmt, 0)
-    display.show(buf)
-
-    # Benchmark
-    gc.collect()
-    t0 = time.ticks_us()
-    for f in range(frames):
-        _fill_pattern(buf, width, height, fmt, f)
+        # Warmup
+        _fill_pattern(buf, width, height, fmt, 0)
         display.show(buf)
-    elapsed = time.ticks_diff(time.ticks_us(), t0) / 1000000.0
 
-    fps = frames / elapsed if elapsed > 0 else 0
-    print(f"FPS: {fps:.1f} ({frames} frames in {elapsed:.3f}s, {elapsed/frames*1000:.1f} ms/frame)")
+        # Benchmark
+        gc.collect()
+        t0 = time.ticks_us()
+        for f in range(frames):
+            _fill_pattern(buf, width, height, fmt, f)
+            display.show(buf)
+        elapsed = time.ticks_diff(time.ticks_us(), t0) / 1000000.0
 
-    display.set_brightness(0)  # Minimize power during teardown
-    # display.end() is implicit via __del__
+        fps = frames / elapsed if elapsed > 0 else 0
+        print(f"FPS: {fps:.1f} ({frames} frames in {elapsed:.3f}s, {elapsed/frames*1000:.1f} ms/frame)")
 
-    return fps, buf_size
+        return fps, buf_size
+    finally:
+        if display is not None:
+            try:
+                display.set_brightness(0)  # Minimize power during teardown
+            except Exception:
+                pass
+            del display
+            gc.collect()
 
 
 def run(width=64, height=64, frames=60, clock=hub75.CLK_20M):

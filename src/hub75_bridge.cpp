@@ -59,13 +59,17 @@ static Hub75ClockSpeed map_clock_speed(uint32_t hz) {
     return Hub75ClockSpeed::HZ_32M;
 }
 
+static uint32_t get_bit_depth(void) {
+#if defined(HUB75_BIT_DEPTH)
+    return HUB75_BIT_DEPTH;
+#else
+    return 8;
+#endif
+}
+
 // refresh_rate ≈ clock / (N_rows × (2^B - 1) × dma_width)
 static float calculate_refresh_rate(const Hub75Config& cfg) {
-    #if defined(HUB75_BIT_DEPTH)
-    int b = HUB75_BIT_DEPTH;
-    #else
-    int b = 8;
-    #endif
+    uint32_t b = get_bit_depth();
     uint32_t clk = static_cast<uint32_t>(cfg.output_clock_speed);
     uint32_t dma_w = cfg.panel_width;
     uint32_t rows  = cfg.panel_height / 2;
@@ -185,12 +189,23 @@ size_t hub75_bridge_buf_size(const Hub75BridgeConfig* c) {
     return calc_user_buf_size(c);
 }
 
+size_t hub75_bridge_dma_per_buffer(const Hub75BridgeConfig* c) {
+    uint32_t dma_w = c->panel_width;
+    uint32_t rows = c->panel_height / 2;
+    uint32_t bit_depth = get_bit_depth();
+    return (size_t)(rows * dma_w * bit_depth * 2);
+}
+
+size_t hub75_bridge_dma_overhead(const Hub75BridgeConfig* c) {
+    uint32_t rows = c->panel_height / 2;
+    uint32_t bit_depth = get_bit_depth();
+    uint32_t desc = rows * bit_depth * 12 * 2;
+    uint32_t meta = rows * 16 * 2;
+    return (size_t)(desc + meta);
+}
+
 size_t hub75_bridge_dma_total(const Hub75BridgeConfig* c) {
-    // Estimate: 2 × N_rows × dma_width × bit_depth × 2 + overhead
-    uint32_t dma_w    = c->panel_width;
-    uint32_t rows     = c->panel_height / 2;
-    uint32_t per_buf  = rows * dma_w * 8 * 2;      // bit_depth=8, uint16_t=2 bytes
-    uint32_t desc     = rows * 8 * 12 * 2;          // descriptors × 2 buffers
-    uint32_t meta     = rows * 16 * 2;              // metadata × 2 buffers
-    return (size_t)(per_buf * 2 + desc + meta);
+    size_t per_buf = hub75_bridge_dma_per_buffer(c);
+    size_t overhead = hub75_bridge_dma_overhead(c);
+    return per_buf * 2 + overhead;
 }

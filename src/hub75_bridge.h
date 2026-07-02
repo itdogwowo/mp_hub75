@@ -59,7 +59,9 @@ const char* hub75_bridge_get_version(void);
 // Expected buffer size in bytes for given config and pixel format
 size_t hub75_bridge_buf_size(const Hub75BridgeConfig* config);
 
-// Internal DMA memory usage estimate (informational)
+// Internal DMA memory usage estimates (informational)
+size_t hub75_bridge_dma_per_buffer(const Hub75BridgeConfig* config);
+size_t hub75_bridge_dma_overhead(const Hub75BridgeConfig* config);
 size_t hub75_bridge_dma_total(const Hub75BridgeConfig* config);
 
 #ifdef __cplusplus

@@ -238,18 +238,18 @@ static mp_obj_t display_buffer_info(mp_obj_t self_in) {
     Hub75BridgeConfig cfg = {0};
     cfg.panel_width = self->width;
     cfg.panel_height = self->height;
+    size_t per = hub75_bridge_dma_per_buffer(&cfg);
+    size_t ovh = hub75_bridge_dma_overhead(&cfg);
     size_t total = hub75_bridge_dma_total(&cfg);
-    size_t per   = total / 2;
-    size_t ovh   = total - per * 2;
 
-    mp_obj_t dict = mp_obj_new_dict(4, 0);
-    mp_obj_dict_store(MP_OBJ_FROM_PTR(&mp_type_dict), dict,
+    mp_obj_t dict = mp_obj_new_dict(4);
+    mp_obj_dict_store(dict,
         MP_ROM_QSTR(MP_QSTR_dma_per_buffer), mp_obj_new_int_from_ull(per));
-    mp_obj_dict_store(MP_OBJ_FROM_PTR(&mp_type_dict), dict,
+    mp_obj_dict_store(dict,
         MP_ROM_QSTR(MP_QSTR_dma_total), mp_obj_new_int_from_ull(per * 2));
-    mp_obj_dict_store(MP_OBJ_FROM_PTR(&mp_type_dict), dict,
+    mp_obj_dict_store(dict,
         MP_ROM_QSTR(MP_QSTR_overhead), mp_obj_new_int_from_ull(ovh));
-    mp_obj_dict_store(MP_OBJ_FROM_PTR(&mp_type_dict), dict,
+    mp_obj_dict_store(dict,
         MP_ROM_QSTR(MP_QSTR_total), mp_obj_new_int_from_ull(total));
     return dict;
 }
@@ -257,16 +257,28 @@ static MP_DEFINE_CONST_FUN_OBJ_1(display_buffer_info_obj, display_buffer_info);
 
 // ── __del__ ─────────────────────────────────────────────────
 
-static mp_obj_t display_del(mp_obj_t self_in) {
-    hub75_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+static void display_release(hub75_display_obj_t *self) {
     if (self->handle) {
         hub75_bridge_destroy(self->handle);
         self->handle = NULL;
     }
     self->running = false;
+}
+
+static mp_obj_t display_del(mp_obj_t self_in) {
+    hub75_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    display_release(self);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(display_del_obj, display_del);
+
+static mp_obj_t display_exit(size_t n_args, const mp_obj_t *args) {
+    (void)n_args;
+    hub75_display_obj_t *self = MP_OBJ_TO_PTR(args[0]);
+    display_release(self);
+    return mp_const_false;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(display_exit_obj, 4, 4, display_exit);
 
 // ── Display locals_dict ─────────────────────────────────────
 
@@ -278,7 +290,7 @@ static const mp_rom_map_elem_t display_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_buffer_info),    MP_ROM_PTR(&display_buffer_info_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__),        MP_ROM_PTR(&display_del_obj) },
     { MP_ROM_QSTR(MP_QSTR___enter__),      MP_ROM_PTR(&mp_identity_obj) },
-    { MP_ROM_QSTR(MP_QSTR___exit__),       MP_ROM_PTR(&display_del_obj) },
+    { MP_ROM_QSTR(MP_QSTR___exit__),       MP_ROM_PTR(&display_exit_obj) },
 };
 static MP_DEFINE_CONST_DICT(display_locals_dict, display_locals_dict_table);
 
