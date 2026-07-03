@@ -54,6 +54,8 @@ typedef struct _hub75_display_obj_t {
     bool running;
 } hub75_display_obj_t;
 
+static hub75_display_obj_t *s_active_display = NULL;
+
 // ── Display.make_new ────────────────────────────────────────
 
 enum {
@@ -191,9 +193,22 @@ static void display_validate_config(const Hub75BridgeConfig *cfg) {
     display_validate_pins(cfg);
 }
 
+static void display_unregister_active(hub75_display_obj_t *self) {
+    if (s_active_display == self) {
+        s_active_display = NULL;
+    }
+}
+
+static void display_release(hub75_display_obj_t *self);
+static void display_destroy(hub75_display_obj_t *self);
+
 static mp_obj_t display_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     mp_arg_val_t parsed[MP_ARRAY_SIZE(display_allowed_args)];
     mp_arg_parse_all_kw_array(n_args, n_kw, args, MP_ARRAY_SIZE(display_allowed_args), display_allowed_args, parsed);
+
+    if (s_active_display) {
+        display_destroy(s_active_display);
+    }
 
     hub75_display_obj_t *self = mp_obj_malloc_with_finaliser(hub75_display_obj_t, &mp_hub75_display_type);
     self->handle = NULL;
@@ -260,6 +275,8 @@ static mp_obj_t display_make_new(const mp_obj_type_t *type, size_t n_args, size_
     if (!self->handle) {
         mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Failed to create HUB75 driver"));
     }
+
+    s_active_display = self;
 
     return MP_OBJ_FROM_PTR(self);
 }
@@ -432,6 +449,7 @@ static void display_destroy(hub75_display_obj_t *self) {
         self->handle = NULL;
     }
     self->running = false;
+    display_unregister_active(self);
 }
 
 static mp_obj_t display_del(mp_obj_t self_in) {

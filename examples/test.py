@@ -6,10 +6,11 @@ import hub75
 
 
 DEFAULT_PINS = {
-    "r1": 25, "g1": 26, "b1": 27,
-    "r2": 14, "g2": 12, "b2": 13,
-    "a": 23, "b": 19, "c": 5, "d": 17, "e": -1,
-    "lat": 4, "oe": 15, "clk": 16,
+    # Matches the ESP32-S3-RGB-Matrix reference board examples.
+    "r1": 4, "g1": 5, "b1": 6,
+    "r2": 7, "g2": 15, "b2": 16,
+    "a": 18, "b": 8, "c": 3, "d": 42, "e": 9,
+    "lat": 40, "oe": 2, "clk": 41,
 }
 
 

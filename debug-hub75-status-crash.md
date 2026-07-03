@@ -29,6 +29,8 @@
 - `display.buffer_info()` also crashed before `begin()`, which rules out DMA-startup conflicts because this path only performs size estimation and MicroPython object construction.
 - Current leading hypothesis: pre-`begin()` crashes come from the extension's dict/string object-building path rather than hardware initialization.
 - Output ordering is ambiguous because `print()` may not fully flush before a native reset, so Python-side breadcrumbs need short delays to establish the true crash boundary.
+- After switching to the reference-board pin map, first-run bring-up and playback succeeded end-to-end.
+- A new symptom appeared on repeated runs: creating a fresh `Display(...)` after a prior run could leave the panel unresponsive, consistent with the previous object's handle surviving until GC/finalizer.
 
 ## Plan
 - Remove pre-`begin()` status probing from the example and keep only core checkpoints.
@@ -36,3 +38,4 @@
 - If core flow succeeds, revisit and harden the diagnostics API separately.
 - Harden `buffer_info()` first by returning a minimal tuple instead of a dict.
 - Replace verbose example prints with short stage markers plus short sleeps to improve breadcrumb reliability across USB disconnects.
+- Harden object lifecycle so creating a new `Display(...)` proactively destroys any previously active display handle before allocating a new one.
