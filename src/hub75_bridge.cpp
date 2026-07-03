@@ -115,12 +115,12 @@ static void reset_pin_to_input(int8_t pin) {
     gpio_set_direction((gpio_num_t)pin, GPIO_MODE_INPUT);
 }
 
-static void reset_panel_pins(const Hub75BridgeConfig* c) {
+static void reset_panel_pins(const Hub75Config* c) {
     int8_t pins[] = {
-        c->r1, c->g1, c->b1,
-        c->r2, c->g2, c->b2,
-        c->a, c->b, c->c, c->d, c->e,
-        c->lat, c->oe, c->clk,
+        c->pins.r1, c->pins.g1, c->pins.b1,
+        c->pins.r2, c->pins.g2, c->pins.b2,
+        c->pins.a, c->pins.b, c->pins.c, c->pins.d, c->pins.e,
+        c->pins.lat, c->pins.oe, c->pins.clk,
     };
     for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
         reset_pin_to_input(pins[i]);
