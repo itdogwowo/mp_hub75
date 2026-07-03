@@ -12,7 +12,7 @@ DEFAULT_PINS = {
 }
 
 
-def _make_display(width, height, brightness=96, clock=hub75.CLK_20M):
+def _make_display(width, height, brightness=16, clock=hub75.CLK_10M, safe_mode=True):
     scan = hub75.MOD16 if height > 32 else hub75.MOD8
     return hub75.Display(
         width=width,
@@ -27,6 +27,9 @@ def _make_display(width, height, brightness=96, clock=hub75.CLK_20M):
         scan=scan,
         clock_speed=clock,
         brightness=brightness,
+        min_refresh_rate=30,
+        clk_phase_inverted=False,
+        safe_mode=safe_mode,
     )
 
 
@@ -36,6 +39,57 @@ def _fill_solid(buf, width, height, r, g, b):
         buf[idx] = r
         buf[idx + 1] = g
         buf[idx + 2] = b
+
+
+def safe_start(width=64, height=32):
+    """Bring-up with conservative timing and brightness."""
+    print("hub75 version:", hub75.version())
+
+    display = _make_display(width, height, brightness=1, clock=hub75.CLK_8M, safe_mode=True)
+    buf = bytearray(width * height * 3)
+    _fill_solid(buf, width, height, 4, 4, 4)
+
+    try:
+        print("status(before begin):", display.status())
+        print("buffer_info:", display.buffer_info())
+        print("[1/5] begin() ...")
+        display.begin()
+        print("  ok effective:", display.width, "x", display.height)
+        print("  status:", display.status())
+        print("[2/5] show() dim frame (RGB=4) ...")
+        display.show(buf)
+        print("  ok")
+        time.sleep_ms(500)
+
+        for level in (2, 4, 8, 16, 32):
+            print("[3/5] brightness=%d ..." % level)
+            display.set_brightness(level)
+            print("  status:", display.status())
+            time.sleep_ms(300)
+
+        print("[4/5] show() solid colors at brightness=32 ...")
+        _fill_solid(buf, width, height, 16, 0, 0)
+        display.show(buf)
+        time.sleep_ms(400)
+        _fill_solid(buf, width, height, 0, 16, 0)
+        display.show(buf)
+        time.sleep_ms(400)
+        _fill_solid(buf, width, height, 0, 0, 16)
+        display.show(buf)
+        time.sleep_ms(400)
+
+        print("[5/5] safe_start done")
+        return True
+    finally:
+        try:
+            display.set_brightness(0)
+        except Exception:
+            pass
+        try:
+            display.close()
+        finally:
+            del display
+            gc.collect()
 
 
 def _fill_checker(buf, width, height, step=8):
@@ -57,30 +111,27 @@ def _fill_gradient(buf, width, height):
             buf[idx + 2] = ((x + y) * 255) // max(width + height - 2, 1)
 
 
-def run(width=64, height=32, delay_ms=700):
+def run(width=64, height=32, delay_ms=700, brightness=32):
     print("hub75 version:", hub75.version())
 
-    display = _make_display(width, height)
+    display = _make_display(width, height, brightness=brightness, clock=hub75.CLK_10M, safe_mode=True)
     buf = bytearray(width * height * 3)
 
     try:
-        info = display.buffer_info()
-        print("buffer_info:", info)
-
+        print("status(before begin):", display.status())
+        print("buffer_info:", display.buffer_info())
         display.begin()
-        print("effective size:", display.width, "x", display.height)
-        print("refresh_rate:", display.refresh_rate)
-        print("is_running:", display.is_running)
+        print("status(after begin):", display.status())
 
-        _fill_solid(buf, width, height, 255, 0, 0)
+        _fill_solid(buf, width, height, 16, 0, 0)
         display.show(buf)
         time.sleep_ms(delay_ms)
 
-        _fill_solid(buf, width, height, 0, 255, 0)
+        _fill_solid(buf, width, height, 0, 16, 0)
         display.show(buf)
         time.sleep_ms(delay_ms)
 
-        _fill_solid(buf, width, height, 0, 0, 255)
+        _fill_solid(buf, width, height, 0, 0, 16)
         display.show(buf)
         time.sleep_ms(delay_ms)
 
@@ -95,11 +146,20 @@ def run(width=64, height=32, delay_ms=700):
         print("test done")
         return True
     finally:
-        if display:
+        try:
             display.set_brightness(0)
+        except Exception:
+            pass
+        try:
+            display.close()
+        finally:
             del display
-        gc.collect()
+            gc.collect()
 
 
 if __name__ == "__main__":
-    run()
+    print("=== safe_start ===")
+    safe_start()
+    print()
+    print("=== run (brightness=32) ===")
+    run(brightness=32)

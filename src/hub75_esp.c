@@ -9,6 +9,8 @@
 #include "py/mphal.h"
 #include "hub75_bridge.h"
 
+#include <string.h>
+
 // ── Enum constants ──────────────────────────────────────────
 
 #define PF_RGB888    0
@@ -61,6 +63,7 @@ enum {
     ARG_lat, ARG_oe, ARG_clk,
     ARG_pixel_format, ARG_driver, ARG_scan,
     ARG_brightness, ARG_rotation, ARG_clock_speed,
+    ARG_clk_phase_inverted, ARG_min_refresh_rate, ARG_safe_mode,
 };
 
 static const mp_arg_t display_allowed_args[] = {
@@ -86,7 +89,95 @@ static const mp_arg_t display_allowed_args[] = {
     { MP_QSTR_brightness,   MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 128} },
     { MP_QSTR_rotation,     MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = ROT_0} },
     { MP_QSTR_clock_speed,  MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = CLK_20M} },
+    { MP_QSTR_clk_phase_inverted, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
+    { MP_QSTR_min_refresh_rate,   MP_ARG_KW_ONLY | MP_ARG_INT,  {.u_int = 60} },
+    { MP_QSTR_safe_mode,          MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = false} },
 };
+
+static const char *display_last_stage(hub75_display_obj_t *self) {
+    if (!self || !self->handle) {
+        return "released";
+    }
+    const char *stage = hub75_bridge_get_last_stage(self->handle);
+    return (stage && stage[0]) ? stage : "unknown";
+}
+
+static const char *display_last_error(hub75_display_obj_t *self) {
+    if (!self || !self->handle) {
+        return "released";
+    }
+    const char *error = hub75_bridge_get_last_error(self->handle);
+    return (error && error[0]) ? error : "none";
+}
+
+static void display_raise_bridge_error(hub75_display_obj_t *self, const char *action) {
+    mp_raise_msg_varg(&mp_type_RuntimeError,
+        MP_ERROR_TEXT("%s failed at %s: %s"),
+        action, display_last_stage(self), display_last_error(self));
+}
+
+static void display_validate_pins(const Hub75BridgeConfig *cfg) {
+    static const char *pin_names[] = {
+        "r1", "g1", "b1", "r2", "g2", "b2",
+        "a", "b", "c", "d", "lat", "oe", "clk"
+    };
+    int8_t required_pins[] = {
+        cfg->r1, cfg->g1, cfg->b1, cfg->r2, cfg->g2, cfg->b2,
+        cfg->a, cfg->b, cfg->c, cfg->d, cfg->lat, cfg->oe, cfg->clk
+    };
+
+    for (size_t i = 0; i < MP_ARRAY_SIZE(required_pins); ++i) {
+        if (required_pins[i] < 0) {
+            mp_raise_msg_varg(&mp_type_ValueError,
+                MP_ERROR_TEXT("pin '%s' is required"),
+                pin_names[i]);
+        }
+    }
+
+    int8_t pins[] = {
+        cfg->r1, cfg->g1, cfg->b1, cfg->r2, cfg->g2, cfg->b2,
+        cfg->a, cfg->b, cfg->c, cfg->d, cfg->e, cfg->lat, cfg->oe, cfg->clk
+    };
+    const char *all_pin_names[] = {
+        "r1", "g1", "b1", "r2", "g2", "b2",
+        "a", "b", "c", "d", "e", "lat", "oe", "clk"
+    };
+
+    for (size_t i = 0; i < MP_ARRAY_SIZE(pins); ++i) {
+        if (pins[i] < 0) {
+            continue;
+        }
+        for (size_t j = i + 1; j < MP_ARRAY_SIZE(pins); ++j) {
+            if (pins[i] == pins[j]) {
+                mp_raise_msg_varg(&mp_type_ValueError,
+                    MP_ERROR_TEXT("pins '%s' and '%s' both use GPIO %d"),
+                    all_pin_names[i], all_pin_names[j], (int)pins[i]);
+            }
+        }
+    }
+}
+
+static void display_validate_config(const Hub75BridgeConfig *cfg) {
+    if (!(cfg->pixel_format == PF_RGB888 || cfg->pixel_format == PF_RGB565 || cfg->pixel_format == PF_RGBX8888)) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("invalid pixel_format"));
+    }
+    if (cfg->shift_driver < DRV_GENERIC || cfg->shift_driver > DRV_DP3246) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("invalid driver"));
+    }
+    if (!(cfg->scan_wiring == SCAN_MOD8 || cfg->scan_wiring == SCAN_MOD16)) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("invalid scan"));
+    }
+    if (!(cfg->rotation == ROT_0 || cfg->rotation == ROT_90 || cfg->rotation == ROT_180 || cfg->rotation == ROT_270)) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("rotation must be 0/90/180/270"));
+    }
+    if (cfg->clock_speed == 0) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("clock_speed must be > 0"));
+    }
+    if (cfg->min_refresh_rate == 0) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("min_refresh_rate must be > 0"));
+    }
+    display_validate_pins(cfg);
+}
 
 static mp_obj_t display_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args) {
     mp_arg_val_t parsed[MP_ARRAY_SIZE(display_allowed_args)];
@@ -122,15 +213,32 @@ static mp_obj_t display_make_new(const mp_obj_type_t *type, size_t n_args, size_
     cfg.oe  = (int8_t)parsed[ARG_oe].u_int;
     cfg.clk = (int8_t)parsed[ARG_clk].u_int;
 
+    int brightness = parsed[ARG_brightness].u_int;
+    int rotation = parsed[ARG_rotation].u_int;
+    int clock_speed = parsed[ARG_clock_speed].u_int;
+    int min_refresh_rate = parsed[ARG_min_refresh_rate].u_int;
+    if (brightness < 0 || brightness > 255) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("brightness 0-255"));
+    }
+    if (clock_speed <= 0) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("clock_speed must be > 0"));
+    }
+    if (min_refresh_rate <= 0 || min_refresh_rate > 65535) {
+        mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("min_refresh_rate must be 1-65535"));
+    }
+
     // Optional
     cfg.pixel_format  = parsed[ARG_pixel_format].u_int;
     cfg.shift_driver  = parsed[ARG_driver].u_int;
     cfg.scan_wiring   = parsed[ARG_scan].u_int;
-    cfg.brightness    = (uint8_t)parsed[ARG_brightness].u_int;
-    cfg.rotation      = parsed[ARG_rotation].u_int;
-    cfg.clock_speed   = (uint32_t)parsed[ARG_clock_speed].u_int;
-    cfg.clk_phase_inverted = false;
-    cfg.min_refresh_rate = 60;
+    cfg.brightness    = (uint8_t)brightness;
+    cfg.rotation      = rotation;
+    cfg.clock_speed   = (uint32_t)clock_speed;
+    cfg.clk_phase_inverted = parsed[ARG_clk_phase_inverted].u_bool;
+    cfg.min_refresh_rate = (uint16_t)min_refresh_rate;
+    cfg.safe_mode = parsed[ARG_safe_mode].u_bool;
+
+    display_validate_config(&cfg);
 
     self->pixel_format = cfg.pixel_format;
     self->width  = w;
@@ -154,10 +262,9 @@ static mp_obj_t display_begin(mp_obj_t self_in) {
         cfg.panel_width  = self->width;
         cfg.panel_height = self->height;
         size_t needed = hub75_bridge_dma_total(&cfg);
-        mp_raise_msg_varg(&mp_type_MemoryError,
-            MP_ERROR_TEXT("DMA buffer allocation failed: ~%u bytes required. "
-                          "Try smaller panel or reduce bit_depth at build time."),
-            (unsigned int)needed);
+        mp_raise_msg_varg(&mp_type_RuntimeError,
+            MP_ERROR_TEXT("begin failed at %s: %s (~%u DMA bytes)"),
+            display_last_stage(self), display_last_error(self), (unsigned int)needed);
     }
     self->width  = hub75_bridge_get_width(self->handle);
     self->height = hub75_bridge_get_height(self->handle);
@@ -188,7 +295,9 @@ static mp_obj_t display_show(mp_obj_t self_in, mp_obj_t buf_obj) {
             (unsigned int)bufinfo.len, (unsigned int)expected);
     }
 
-    hub75_bridge_show(self->handle, (const uint8_t*)bufinfo.buf, bufinfo.len);
+    if (!hub75_bridge_show(self->handle, (const uint8_t*)bufinfo.buf, bufinfo.len)) {
+        display_raise_bridge_error(self, "show");
+    }
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(display_show_obj, display_show);
@@ -214,6 +323,35 @@ static mp_obj_t display_set_rotation(mp_obj_t self_in, mp_obj_t val_obj) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(display_set_rotation_obj, display_set_rotation);
 
+static mp_obj_t display_close(mp_obj_t self_in) {
+    hub75_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->handle) {
+        hub75_bridge_close(self->handle);
+        self->width = hub75_bridge_get_width(self->handle);
+        self->height = hub75_bridge_get_height(self->handle);
+    }
+    self->running = false;
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(display_close_obj, display_close);
+
+static mp_obj_t display_status(mp_obj_t self_in) {
+    hub75_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_obj_t dict = mp_obj_new_dict(10);
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_width), mp_obj_new_int(self->width));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_height), mp_obj_new_int(self->height));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_refresh_rate), mp_obj_new_float(hub75_bridge_get_refresh_rate(self->handle)));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_is_running), mp_obj_new_bool(hub75_bridge_is_running(self->handle)));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_brightness), mp_obj_new_int(hub75_bridge_get_brightness(self->handle)));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_clock_speed), mp_obj_new_int_from_uint(hub75_bridge_get_clock_speed(self->handle)));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_bit_depth), mp_obj_new_int_from_uint(hub75_bridge_get_bit_depth(self->handle)));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_safe_mode), mp_obj_new_bool(hub75_bridge_get_safe_mode(self->handle)));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_last_stage), mp_obj_new_str(display_last_stage(self), strlen(display_last_stage(self))));
+    mp_obj_dict_store(dict, MP_ROM_QSTR(MP_QSTR_last_error), mp_obj_new_str(display_last_error(self), strlen(display_last_error(self))));
+    return dict;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(display_status_obj, display_status);
+
 // ── Attributes (width, height, refresh_rate, is_running) ───
 
 static void display_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
@@ -227,6 +365,18 @@ static void display_attr(mp_obj_t self_in, qstr attr, mp_obj_t *dest) {
             dest[0] = mp_obj_new_float(hub75_bridge_get_refresh_rate(self->handle));
         } else if (attr == MP_QSTR_is_running) {
             dest[0] = mp_obj_new_bool(hub75_bridge_is_running(self->handle));
+        } else if (attr == MP_QSTR_brightness) {
+            dest[0] = mp_obj_new_int(hub75_bridge_get_brightness(self->handle));
+        } else if (attr == MP_QSTR_clock_speed) {
+            dest[0] = mp_obj_new_int_from_uint(hub75_bridge_get_clock_speed(self->handle));
+        } else if (attr == MP_QSTR_bit_depth) {
+            dest[0] = mp_obj_new_int_from_uint(hub75_bridge_get_bit_depth(self->handle));
+        } else if (attr == MP_QSTR_safe_mode) {
+            dest[0] = mp_obj_new_bool(hub75_bridge_get_safe_mode(self->handle));
+        } else if (attr == MP_QSTR_last_stage) {
+            dest[0] = mp_obj_new_str(display_last_stage(self), strlen(display_last_stage(self)));
+        } else if (attr == MP_QSTR_last_error) {
+            dest[0] = mp_obj_new_str(display_last_error(self), strlen(display_last_error(self)));
         } else {
             // Fall through to locals_dict for bound methods.
             dest[1] = MP_OBJ_SENTINEL;
@@ -262,6 +412,15 @@ static MP_DEFINE_CONST_FUN_OBJ_1(display_buffer_info_obj, display_buffer_info);
 
 static void display_release(hub75_display_obj_t *self) {
     if (self->handle) {
+        hub75_bridge_close(self->handle);
+        self->width = hub75_bridge_get_width(self->handle);
+        self->height = hub75_bridge_get_height(self->handle);
+    }
+    self->running = false;
+}
+
+static void display_destroy(hub75_display_obj_t *self) {
+    if (self->handle) {
         hub75_bridge_destroy(self->handle);
         self->handle = NULL;
     }
@@ -270,7 +429,7 @@ static void display_release(hub75_display_obj_t *self) {
 
 static mp_obj_t display_del(mp_obj_t self_in) {
     hub75_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    display_release(self);
+    display_destroy(self);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(display_del_obj, display_del);
@@ -288,9 +447,12 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(display_exit_obj, 4, 4, display_exit)
 static const mp_rom_map_elem_t display_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_begin),          MP_ROM_PTR(&display_begin_obj) },
     { MP_ROM_QSTR(MP_QSTR_show),           MP_ROM_PTR(&display_show_obj) },
+    { MP_ROM_QSTR(MP_QSTR_close),          MP_ROM_PTR(&display_close_obj) },
+    { MP_ROM_QSTR(MP_QSTR_deinit),         MP_ROM_PTR(&display_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_brightness), MP_ROM_PTR(&display_set_brightness_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_rotation),   MP_ROM_PTR(&display_set_rotation_obj) },
     { MP_ROM_QSTR(MP_QSTR_buffer_info),    MP_ROM_PTR(&display_buffer_info_obj) },
+    { MP_ROM_QSTR(MP_QSTR_status),         MP_ROM_PTR(&display_status_obj) },
     { MP_ROM_QSTR(MP_QSTR___del__),        MP_ROM_PTR(&display_del_obj) },
     { MP_ROM_QSTR(MP_QSTR___enter__),      MP_ROM_PTR(&mp_identity_obj) },
     { MP_ROM_QSTR(MP_QSTR___exit__),       MP_ROM_PTR(&display_exit_obj) },

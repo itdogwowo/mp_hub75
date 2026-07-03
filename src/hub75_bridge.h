@@ -33,15 +33,17 @@ typedef struct {
     uint8_t brightness;    // 0-255
     bool clk_phase_inverted;
     uint16_t min_refresh_rate;  // Usually 60
+    bool safe_mode;
 } Hub75BridgeConfig;
 
 // Lifecycle
 Hub75DriverHandle* hub75_bridge_create(const Hub75BridgeConfig* config);
+void hub75_bridge_close(Hub75DriverHandle* handle);
 void hub75_bridge_destroy(Hub75DriverHandle* handle);
 bool hub75_bridge_begin(Hub75DriverHandle* handle);
 
 // Drawing — converts buf → DMA active buffer → swaps front/active
-void hub75_bridge_show(Hub75DriverHandle* handle, const uint8_t* buf, size_t buf_len);
+bool hub75_bridge_show(Hub75DriverHandle* handle, const uint8_t* buf, size_t buf_len);
 
 // Control
 void hub75_bridge_set_brightness(Hub75DriverHandle* handle, uint8_t brightness);
@@ -52,6 +54,12 @@ uint16_t hub75_bridge_get_width(Hub75DriverHandle* handle);
 uint16_t hub75_bridge_get_height(Hub75DriverHandle* handle);
 float hub75_bridge_get_refresh_rate(Hub75DriverHandle* handle);
 bool hub75_bridge_is_running(Hub75DriverHandle* handle);
+uint8_t hub75_bridge_get_brightness(Hub75DriverHandle* handle);
+uint32_t hub75_bridge_get_clock_speed(Hub75DriverHandle* handle);
+uint32_t hub75_bridge_get_bit_depth(Hub75DriverHandle* handle);
+bool hub75_bridge_get_safe_mode(Hub75DriverHandle* handle);
+const char* hub75_bridge_get_last_stage(Hub75DriverHandle* handle);
+const char* hub75_bridge_get_last_error(Hub75DriverHandle* handle);
 
 // Version string (e.g. "esphome/esp-hub75 0.3.6")
 const char* hub75_bridge_get_version(void);
