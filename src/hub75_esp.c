@@ -120,6 +120,30 @@ static void display_raise_bridge_error(hub75_display_obj_t *self, const char *ac
         action, display_last_stage(self), display_last_error(self));
 }
 
+static void display_require_started(hub75_display_obj_t *self) {
+    if (!self->handle || !hub75_bridge_is_running(self->handle)) {
+        self->running = false;
+        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Display not started. Call begin() first."));
+    }
+    self->running = true;
+}
+
+static void display_get_checked_buffer(hub75_display_obj_t *self, mp_obj_t buf_obj, mp_buffer_info_t *bufinfo) {
+    mp_get_buffer_raise(buf_obj, bufinfo, MP_BUFFER_READ);
+
+    size_t expected = (size_t)self->width * self->height;
+    switch (self->pixel_format) {
+        case PF_RGB888:   expected *= 3; break;
+        case PF_RGB565:   expected *= 2; break;
+        case PF_RGBX8888: expected *= 4; break;
+    }
+    if (bufinfo->len < expected) {
+        mp_raise_msg_varg(&mp_type_ValueError,
+            MP_ERROR_TEXT("Buffer too small: got %u bytes, expected %u"),
+            (unsigned int)bufinfo->len, (unsigned int)expected);
+    }
+}
+
 static void display_validate_pins(const Hub75BridgeConfig *cfg) {
     static const char *pin_names[] = {
         "r1", "g1", "b1", "r2", "g2", "b2",
@@ -356,23 +380,9 @@ static MP_DEFINE_CONST_FUN_OBJ_1(display_begin_obj, display_begin);
 
 static mp_obj_t display_show(mp_obj_t self_in, mp_obj_t buf_obj) {
     hub75_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
-    if (!self->running) {
-        mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Display not started. Call begin() first."));
-    }
     mp_buffer_info_t bufinfo;
-    mp_get_buffer_raise(buf_obj, &bufinfo, MP_BUFFER_READ);
-
-    size_t expected = (size_t)self->width * self->height;
-    switch (self->pixel_format) {
-        case PF_RGB888:   expected *= 3; break;
-        case PF_RGB565:   expected *= 2; break;
-        case PF_RGBX8888: expected *= 4; break;
-    }
-    if (bufinfo.len < expected) {
-        mp_raise_msg_varg(&mp_type_ValueError,
-            MP_ERROR_TEXT("Buffer too small: got %u bytes, expected %u"),
-            (unsigned int)bufinfo.len, (unsigned int)expected);
-    }
+    display_require_started(self);
+    display_get_checked_buffer(self, buf_obj, &bufinfo);
 
     if (!hub75_bridge_show(self->handle, (const uint8_t*)bufinfo.buf, bufinfo.len)) {
         display_raise_bridge_error(self, "show");
@@ -380,6 +390,52 @@ static mp_obj_t display_show(mp_obj_t self_in, mp_obj_t buf_obj) {
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(display_show_obj, display_show);
+
+static mp_obj_t display_try_show(mp_obj_t self_in, mp_obj_t buf_obj) {
+    hub75_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_buffer_info_t bufinfo;
+    display_require_started(self);
+    display_get_checked_buffer(self, buf_obj, &bufinfo);
+
+    if (hub75_bridge_try_show(self->handle, (const uint8_t*)bufinfo.buf, bufinfo.len)) {
+        return mp_const_true;
+    }
+    return mp_const_false;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(display_try_show_obj, display_try_show);
+
+static mp_obj_t display_show_blocking(mp_obj_t self_in, mp_obj_t buf_obj) {
+    hub75_display_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    mp_buffer_info_t bufinfo;
+    display_require_started(self);
+    display_get_checked_buffer(self, buf_obj, &bufinfo);
+
+    float refresh_rate = hub75_bridge_get_refresh_rate(self->handle);
+    mp_uint_t frame_ms = 1;
+    if (refresh_rate > 0.0f) {
+        frame_ms = (mp_uint_t)(1000.0f / refresh_rate);
+        if (frame_ms == 0) {
+            frame_ms = 1;
+        }
+    }
+    mp_uint_t timeout_ms = frame_ms * 4 + 2;
+    mp_uint_t start_ms = mp_hal_ticks_ms();
+
+    while (!hub75_bridge_try_show(self->handle, (const uint8_t*)bufinfo.buf, bufinfo.len)) {
+        if (strcmp(display_last_stage(self), "show_busy") != 0) {
+            return mp_const_false;
+        }
+        if ((mp_hal_ticks_ms() - start_ms) >= timeout_ms) {
+            return mp_const_false;
+        }
+        mp_hal_delay_ms(1);
+    }
+
+    // No DMA EOF callback is exposed yet, so wait one estimated frame time.
+    mp_hal_delay_ms(frame_ms);
+    return mp_const_true;
+}
+static MP_DEFINE_CONST_FUN_OBJ_2(display_show_blocking_obj, display_show_blocking);
 
 // ── set_brightness / set_rotation ───────────────────────────
 
@@ -520,6 +576,8 @@ static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(display_exit_obj, 4, 4, display_exit)
 static const mp_rom_map_elem_t display_locals_dict_table[] = {
     { MP_ROM_QSTR(MP_QSTR_begin),          MP_ROM_PTR(&display_begin_obj) },
     { MP_ROM_QSTR(MP_QSTR_show),           MP_ROM_PTR(&display_show_obj) },
+    { MP_ROM_QSTR(MP_QSTR_try_show),       MP_ROM_PTR(&display_try_show_obj) },
+    { MP_ROM_QSTR(MP_QSTR_show_blocking),  MP_ROM_PTR(&display_show_blocking_obj) },
     { MP_ROM_QSTR(MP_QSTR_close),          MP_ROM_PTR(&display_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_deinit),         MP_ROM_PTR(&display_close_obj) },
     { MP_ROM_QSTR(MP_QSTR_set_brightness), MP_ROM_PTR(&display_set_brightness_obj) },

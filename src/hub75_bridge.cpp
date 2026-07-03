@@ -11,6 +11,7 @@
 #include "soc/lcd_cam_struct.h"
 #include "esp_rom_gpio.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "driver/gpio.h"
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 #include <esp_private/periph_ctrl.h>
@@ -29,6 +30,8 @@ struct Hub75DriverHandle {
     uint16_t height;
     bool safe_mode;
     bool started;
+    uint32_t frame_interval_us;
+    int64_t next_frame_ready_us;
     const char* last_stage;
     const char* last_error;
 };
@@ -113,6 +116,41 @@ static void update_dimensions_from_config(Hub75DriverHandle* h) {
         h->width = h->config.panel_width;
         h->height = h->config.panel_height;
     }
+}
+
+static void update_frame_timing(Hub75DriverHandle* h) {
+    if (!h || h->refresh_rate <= 0.0f) {
+        if (h) {
+            h->frame_interval_us = 0;
+            h->next_frame_ready_us = 0;
+        }
+        return;
+    }
+
+    uint32_t interval = (uint32_t)(1000000.0f / h->refresh_rate);
+    if (interval == 0) {
+        interval = 1;
+    }
+    h->frame_interval_us = interval;
+    h->next_frame_ready_us = 0;
+}
+
+static bool frame_submit_ready(Hub75DriverHandle* h) {
+    if (!h || h->frame_interval_us == 0) {
+        return true;
+    }
+    return esp_timer_get_time() >= h->next_frame_ready_us;
+}
+
+static void mark_frame_submitted(Hub75DriverHandle* h) {
+    if (!h) {
+        return;
+    }
+    if (h->frame_interval_us == 0) {
+        h->next_frame_ready_us = 0;
+        return;
+    }
+    h->next_frame_ready_us = esp_timer_get_time() + h->frame_interval_us;
 }
 
 static void reset_pin_to_input(int8_t pin) {
@@ -243,9 +281,12 @@ Hub75DriverHandle* hub75_bridge_create(const Hub75BridgeConfig* c) {
     h->safe_mode = cfg.safe_mode;
     h->started = false;
     h->driver = nullptr;
+    h->frame_interval_us = 0;
+    h->next_frame_ready_us = 0;
     h->last_stage = "created";
     h->last_error = "";
     update_dimensions_from_config(h);
+    update_frame_timing(h);
 
     return h;
 }
@@ -260,6 +301,7 @@ void hub75_bridge_close(Hub75DriverHandle* h) {
     }
     reset_panel_pins(&h->config);
     h->started = false;
+    h->next_frame_ready_us = 0;
     update_dimensions_from_config(h);
     clear_error(h);
     set_stage(h, "closed");
@@ -297,6 +339,7 @@ bool hub75_bridge_begin(Hub75DriverHandle* h) {
     h->width  = h->driver->get_width();
     h->height = h->driver->get_height();
     h->started = true;
+    h->next_frame_ready_us = 0;
     clear_error(h);
     set_stage(h, "started");
     return true;
@@ -321,8 +364,28 @@ bool hub75_bridge_show(Hub75DriverHandle* h, const uint8_t* buf, size_t buf_len)
                            buf, h->pixel_format, h->color_order, false);
     set_stage(h, "show_flip_buffer");
     h->driver->flip_buffer();
+    mark_frame_submitted(h);
     set_stage(h, "idle");
     return true;
+}
+
+bool hub75_bridge_try_show(Hub75DriverHandle* h, const uint8_t* buf, size_t buf_len) {
+    if (!h) {
+        return false;
+    }
+    if (!h->driver || !h->started) {
+        set_error(h, "show_precheck", "display not started");
+        return false;
+    }
+    if (!buf || buf_len == 0) {
+        set_error(h, "show_precheck", "empty buffer");
+        return false;
+    }
+    if (!frame_submit_ready(h)) {
+        set_error(h, "show_busy", "previous frame still pending");
+        return false;
+    }
+    return hub75_bridge_show(h, buf, buf_len);
 }
 
 bool hub75_bridge_clear(Hub75DriverHandle* h) {

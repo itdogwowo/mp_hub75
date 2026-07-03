@@ -44,6 +44,7 @@ bool hub75_bridge_begin(Hub75DriverHandle* handle);
 
 // Drawing — converts buf → DMA active buffer → swaps front/active
 bool hub75_bridge_show(Hub75DriverHandle* handle, const uint8_t* buf, size_t buf_len);
+bool hub75_bridge_try_show(Hub75DriverHandle* handle, const uint8_t* buf, size_t buf_len);
 bool hub75_bridge_clear(Hub75DriverHandle* handle);
 
 // Control
