@@ -9,39 +9,13 @@
 import hub75
 import time
 import gc
-
-# Default pin mapping (adjust for your board)
-_DEFAULT_PINS = {
-    # Matches the ESP32-S3-RGB-Matrix reference board examples.
-    "r1": 4, "g1": 5, "b1": 6,
-    "r2": 7, "g2": 15, "b2": 16,
-    "a": 18, "b": 8, "c": 3, "d": 42, "e": 9,
-    "lat": 40, "oe": 2, "clk": 41,
-}
+from display_session import get_display, standby_display
 
 _FORMAT_MAP = {
     "RGB888": (hub75.RGB888, 3),
     "RGB565": (hub75.RGB565, 2),
     "RGBX8888": (hub75.RGBX8888, 4),
 }
-
-
-def _make_display(width=64, height=64, fmt="RGB888", clock=hub75.CLK_20M):
-    pf, _ = _FORMAT_MAP[fmt]
-    scan = hub75.MOD16 if height > 32 else hub75.MOD8
-    return hub75.Display(
-        width=width, height=height,
-        r1=_DEFAULT_PINS["r1"], g1=_DEFAULT_PINS["g1"], b1=_DEFAULT_PINS["b1"],
-        r2=_DEFAULT_PINS["r2"], g2=_DEFAULT_PINS["g2"], b2=_DEFAULT_PINS["b2"],
-        a=_DEFAULT_PINS["a"], b=_DEFAULT_PINS["b"], c=_DEFAULT_PINS["c"],
-        d=_DEFAULT_PINS["d"], e=_DEFAULT_PINS["e"],
-        lat=_DEFAULT_PINS["lat"], oe=_DEFAULT_PINS["oe"], clk=_DEFAULT_PINS["clk"],
-        pixel_format=pf,
-        scan=scan,
-        clock_speed=clock,
-    )
-
-
 def _make_buf(width, height, fmt):
     _, bpp = _FORMAT_MAP[fmt]
     return bytearray(width * height * bpp)
@@ -72,77 +46,60 @@ def _fill_pattern(buf, width, height, fmt, frame):
 
 
 def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M):
-    """Benchmark a single pixel format."""
-    display = None
-    try:
-        display = _make_display(width, height, fmt, clock)
-        buf = _make_buf(width, height, fmt)
-        _, bpp = _FORMAT_MAP[fmt]
-        buf_size = width * height * bpp
+    """Benchmark a single pixel format within one initialized display session."""
+    pf, _ = _FORMAT_MAP[fmt]
+    display = get_display(
+        width=width,
+        height=height,
+        pixel_format=pf,
+        clock=clock,
+        safe_mode=True,
+        brightness=32,
+    )
+    buf = _make_buf(width, height, fmt)
+    _, bpp = _FORMAT_MAP[fmt]
+    buf_size = width * height * bpp
 
-        print(f"\n--- {fmt} ({width}x{height}, {clock // 1000000}MHz, {bpp} bytes/px) ---")
-        print(f"Buffer size: {buf_size} bytes")
-        print(f"Approx refresh rate: display.refresh_rate (available after begin())")
+    print(f"\n--- {fmt} ({width}x{height}, {clock // 1000000}MHz, {bpp} bytes/px) ---")
+    print(f"Buffer size: {buf_size} bytes")
+    print("Session mode: one init per boot, reuse the same display object")
 
-        info = display.buffer_info()
-        per_buffer, _, _, total = info
-        print(f"DMA memory: per_buffer={per_buffer}, total={total}")
+    info = display.buffer_info()
+    per_buffer, _, _, total = info
+    print(f"DMA memory: per_buffer={per_buffer}, total={total}")
+    print(f"Refresh rate: {display.refresh_rate:.1f} Hz")
+    print(f"Effective dimensions: {display.width}x{display.height}")
 
-        display.begin()
-        print(f"Refresh rate: {display.refresh_rate:.1f} Hz")
-        print(f"Effective dimensions: {display.width}x{display.height}")
+    _fill_pattern(buf, width, height, fmt, 0)
+    display.show(buf)
 
-        # Warmup
-        _fill_pattern(buf, width, height, fmt, 0)
+    gc.collect()
+    t0 = time.ticks_us()
+    for f in range(frames):
+        _fill_pattern(buf, width, height, fmt, f)
         display.show(buf)
+    elapsed = time.ticks_diff(time.ticks_us(), t0) / 1000000.0
 
-        # Benchmark
-        gc.collect()
-        t0 = time.ticks_us()
-        for f in range(frames):
-            _fill_pattern(buf, width, height, fmt, f)
-            display.show(buf)
-        elapsed = time.ticks_diff(time.ticks_us(), t0) / 1000000.0
-
-        fps = frames / elapsed if elapsed > 0 else 0
-        print(f"FPS: {fps:.1f} ({frames} frames in {elapsed:.3f}s, {elapsed/frames*1000:.1f} ms/frame)")
-
-        return fps, buf_size
-    finally:
-        if display is not None:
-            try:
-                display.set_brightness(0)  # Minimize power during teardown
-            except Exception:
-                pass
-            del display
-            gc.collect()
+    fps = frames / elapsed if elapsed > 0 else 0
+    print(f"FPS: {fps:.1f} ({frames} frames in {elapsed:.3f}s, {elapsed/frames*1000:.1f} ms/frame)")
+    standby_display(0)
+    return fps, buf_size
 
 
-def run(width=64, height=64, frames=60, clock=hub75.CLK_20M):
-    """Run benchmarks for all formats."""
+def run(width=64, height=32, fmt="RGB888", frames=60, clock=hub75.CLK_8M):
+    """Run one benchmark session. Change format only after reset."""
     print("=" * 50)
-    print(f"HUB75 Benchmark — {width}x{height}, {frames} frames")
+    print(f"HUB75 Benchmark — {width}x{height}, {fmt}, {frames} frames")
     print("=" * 50)
-
-    results = {}
-    for fmt in ["RGB888", "RGB565", "RGBX8888"]:
-        try:
-            fps, size = benchmark_single_fmt(width, height, fmt, frames, clock)
-            results[fmt] = (fps, size)
-        except MemoryError as e:
-            print(f"  SKIPPED: {e}")
-        except Exception as e:
-            print(f"  ERROR: {e}")
-
+    fps, size = benchmark_single_fmt(width, height, fmt, frames, clock)
+    mbps = fps * size / 1024 / 1024
     print("\n" + "=" * 50)
     print("Summary:")
-    print(f"{'Format':<12} {'Buf Size':>10} {'FPS':>8} {'MB/s':>8}")
-    print("-" * 42)
-    for fmt, (fps, size) in results.items():
-        mbps = fps * size / 1024 / 1024
-        print(f"{fmt:<12} {size:>8} B {fps:>7.1f} {mbps:>7.2f}")
-
-    return results
+    print(f"Format : {fmt}")
+    print(f"Buffer : {size} B")
+    print(f"FPS    : {fps:.1f}")
+    print(f"MB/s   : {mbps:.2f}")
+    return {fmt: (fps, size)}
 
 
 # Run directly as benchmark script
