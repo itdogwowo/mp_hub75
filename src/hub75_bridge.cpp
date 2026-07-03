@@ -5,9 +5,18 @@
 
 #include "hub75_bridge.h"
 #include "hub75.h"
+#include <sdkconfig.h>
+#include <esp_idf_version.h>
 #include "soc/gpio_sig_map.h"
+#include "soc/lcd_cam_struct.h"
 #include "esp_rom_gpio.h"
+#include "esp_rom_sys.h"
 #include "driver/gpio.h"
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#include <esp_private/periph_ctrl.h>
+#else
+#include <driver/periph_ctrl.h>
+#endif
 #include <cstdio>
 
 struct Hub75DriverHandle {
@@ -125,6 +134,29 @@ static void reset_panel_pins(const Hub75Config* c) {
     for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
         reset_pin_to_input(pins[i]);
     }
+}
+
+static void preinit_hardware_cleanup(const Hub75Config* c) {
+    if (!c) {
+        return;
+    }
+
+    // Always release GPIO routing before attempting a fresh bring-up.
+    reset_panel_pins(c);
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    // ESP32-S3 uses LCD_CAM + GDMA. A previous run may leave the peripheral in a
+    // half-stopped state, so force a conservative reset before reinitializing.
+    periph_module_enable(PERIPH_LCD_CAM_MODULE);
+    LCD_CAM.lcd_user.lcd_start = 0;
+    LCD_CAM.lcd_user.lcd_update = 1;
+    LCD_CAM.lcd_misc.lcd_afifo_reset = 1;
+    LCD_CAM.lcd_user.lcd_reset = 1;
+    esp_rom_delay_us(1000);
+    periph_module_reset(PERIPH_LCD_CAM_MODULE);
+    esp_rom_delay_us(1000);
+    periph_module_disable(PERIPH_LCD_CAM_MODULE);
+#endif
 }
 
 static Hub75Rotation map_rotation(int rotation) {
@@ -245,9 +277,10 @@ bool hub75_bridge_begin(Hub75DriverHandle* h) {
     if (h->driver || h->started) {
         hub75_bridge_close(h);
         clear_error(h);
-    } else {
-        set_stage(h, "allocating_driver");
     }
+    set_stage(h, "preinit_cleanup");
+    preinit_hardware_cleanup(&h->config);
+    set_stage(h, "allocating_driver");
     h->driver = new Hub75Driver(h->config);
     if (!h->driver) {
         set_error(h, "allocating_driver", "failed to allocate Hub75Driver");
