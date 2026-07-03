@@ -155,6 +155,18 @@ static void display_validate_pins(const Hub75BridgeConfig *cfg) {
             }
         }
     }
+
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#if MICROPY_HW_USB_CDC
+    for (size_t i = 0; i < MP_ARRAY_SIZE(pins); ++i) {
+        if (pins[i] == 19 || pins[i] == 20) {
+            mp_raise_msg_varg(&mp_type_ValueError,
+                MP_ERROR_TEXT("GPIO %d is reserved for native USB CDC on ESP32-S3; use another pin or disable USB CDC"),
+                (int)pins[i]);
+        }
+    }
+#endif
+#endif
 }
 
 static void display_validate_config(const Hub75BridgeConfig *cfg) {
