@@ -40,7 +40,6 @@ def _fill_solid(buf, width, height, r, g, b):
         buf[idx + 1] = g
         buf[idx + 2] = b
 
-
 def safe_start(width=64, height=32):
     """Bring-up with conservative timing and brightness."""
     print("hub75 version:", hub75.version())
@@ -50,21 +49,19 @@ def safe_start(width=64, height=32):
     _fill_solid(buf, width, height, 4, 4, 4)
 
     try:
-        print("status(before begin):", display.status())
         print("buffer_info:", display.buffer_info())
         print("[1/5] begin() ...")
         display.begin()
-        print("  ok effective:", display.width, "x", display.height)
-        print("  status:", display.status())
+        print("  begin ok")
         print("[2/5] show() dim frame (RGB=4) ...")
         display.show(buf)
-        print("  ok")
+        print("  show ok")
         time.sleep_ms(500)
 
         for level in (2, 4, 8, 16, 32):
             print("[3/5] brightness=%d ..." % level)
             display.set_brightness(level)
-            print("  status:", display.status())
+            print("  ok")
             time.sleep_ms(300)
 
         print("[4/5] show() solid colors at brightness=32 ...")
@@ -118,13 +115,15 @@ def run(width=64, height=32, delay_ms=700, brightness=32):
     buf = bytearray(width * height * 3)
 
     try:
-        print("status(before begin):", display.status())
         print("buffer_info:", display.buffer_info())
+        print("before begin")
         display.begin()
-        print("status(after begin):", display.status())
+        print("after begin")
 
         _fill_solid(buf, width, height, 16, 0, 0)
+        print("before first show")
         display.show(buf)
+        print("after first show")
         time.sleep_ms(delay_ms)
 
         _fill_solid(buf, width, height, 0, 16, 0)

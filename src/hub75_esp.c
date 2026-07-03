@@ -394,17 +394,12 @@ static mp_obj_t display_buffer_info(mp_obj_t self_in) {
     size_t per = hub75_bridge_dma_per_buffer(&cfg);
     size_t ovh = hub75_bridge_dma_overhead(&cfg);
     size_t total = hub75_bridge_dma_total(&cfg);
-
-    mp_obj_t dict = mp_obj_new_dict(4);
-    mp_obj_dict_store(dict,
-        MP_ROM_QSTR(MP_QSTR_dma_per_buffer), mp_obj_new_int_from_ull(per));
-    mp_obj_dict_store(dict,
-        MP_ROM_QSTR(MP_QSTR_dma_total), mp_obj_new_int_from_ull(per * 2));
-    mp_obj_dict_store(dict,
-        MP_ROM_QSTR(MP_QSTR_overhead), mp_obj_new_int_from_ull(ovh));
-    mp_obj_dict_store(dict,
-        MP_ROM_QSTR(MP_QSTR_total), mp_obj_new_int_from_ull(total));
-    return dict;
+    mp_obj_t items[4];
+    items[0] = mp_obj_new_int_from_uint((mp_uint_t)per);
+    items[1] = mp_obj_new_int_from_uint((mp_uint_t)(per * 2));
+    items[2] = mp_obj_new_int_from_uint((mp_uint_t)ovh);
+    items[3] = mp_obj_new_int_from_uint((mp_uint_t)total);
+    return mp_obj_new_tuple(4, items);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(display_buffer_info_obj, display_buffer_info);
 
