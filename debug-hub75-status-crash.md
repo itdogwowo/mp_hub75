@@ -28,9 +28,11 @@
 - Therefore the debug surface itself is interfering with bring-up, so the example should avoid pre-`begin()` string/status access until core display flow is validated.
 - `display.buffer_info()` also crashed before `begin()`, which rules out DMA-startup conflicts because this path only performs size estimation and MicroPython object construction.
 - Current leading hypothesis: pre-`begin()` crashes come from the extension's dict/string object-building path rather than hardware initialization.
+- Output ordering is ambiguous because `print()` may not fully flush before a native reset, so Python-side breadcrumbs need short delays to establish the true crash boundary.
 
 ## Plan
 - Remove pre-`begin()` status probing from the example and keep only core checkpoints.
 - Rebuild and verify whether execution now reaches `buffer_info()`, `begin()`, and `show()`.
 - If core flow succeeds, revisit and harden the diagnostics API separately.
 - Harden `buffer_info()` first by returning a minimal tuple instead of a dict.
+- Replace verbose example prints with short stage markers plus short sleeps to improve breadcrumb reliability across USB disconnects.

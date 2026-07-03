@@ -241,9 +241,13 @@ void hub75_bridge_destroy(Hub75DriverHandle* h) {
 
 bool hub75_bridge_begin(Hub75DriverHandle* h) {
     if (!h) return false;
-    hub75_bridge_close(h);
-    set_stage(h, "allocating_driver");
     clear_error(h);
+    if (h->driver || h->started) {
+        hub75_bridge_close(h);
+        clear_error(h);
+    } else {
+        set_stage(h, "allocating_driver");
+    }
     h->driver = new Hub75Driver(h->config);
     if (!h->driver) {
         set_error(h, "allocating_driver", "failed to allocate Hub75Driver");

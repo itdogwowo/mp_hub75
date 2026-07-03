@@ -1,5 +1,6 @@
 import gc
 import time
+import machine
 
 import hub75
 
@@ -42,6 +43,7 @@ def _fill_solid(buf, width, height, r, g, b):
 
 def safe_start(width=64, height=32):
     """Bring-up with conservative timing and brightness."""
+    print("reset_cause:", machine.reset_cause())
     print("hub75 version:", hub75.version())
 
     display = _make_display(width, height, brightness=1, clock=hub75.CLK_8M, safe_mode=True)
@@ -49,22 +51,28 @@ def safe_start(width=64, height=32):
     _fill_solid(buf, width, height, 4, 4, 4)
 
     try:
-        print("buffer_info:", display.buffer_info())
-        print("[1/5] begin() ...")
+        print("M1")
+        time.sleep_ms(100)
+        print("M2")
+        time.sleep_ms(100)
         display.begin()
-        print("  begin ok")
-        print("[2/5] show() dim frame (RGB=4) ...")
+        print("M3")
+        time.sleep_ms(100)
+        print("M4")
+        time.sleep_ms(100)
         display.show(buf)
-        print("  show ok")
+        print("M5")
         time.sleep_ms(500)
 
         for level in (2, 4, 8, 16, 32):
-            print("[3/5] brightness=%d ..." % level)
+            print("MB", level)
+            time.sleep_ms(100)
             display.set_brightness(level)
-            print("  ok")
+            print("MX", level)
             time.sleep_ms(300)
 
-        print("[4/5] show() solid colors at brightness=32 ...")
+        print("M6")
+        time.sleep_ms(100)
         _fill_solid(buf, width, height, 16, 0, 0)
         display.show(buf)
         time.sleep_ms(400)
@@ -75,7 +83,7 @@ def safe_start(width=64, height=32):
         display.show(buf)
         time.sleep_ms(400)
 
-        print("[5/5] safe_start done")
+        print("M7")
         return True
     finally:
         try:
@@ -109,21 +117,24 @@ def _fill_gradient(buf, width, height):
 
 
 def run(width=64, height=32, delay_ms=700, brightness=32):
+    print("reset_cause:", machine.reset_cause())
     print("hub75 version:", hub75.version())
 
     display = _make_display(width, height, brightness=brightness, clock=hub75.CLK_10M, safe_mode=True)
     buf = bytearray(width * height * 3)
 
     try:
-        print("buffer_info:", display.buffer_info())
-        print("before begin")
+        print("R1")
+        time.sleep_ms(100)
         display.begin()
-        print("after begin")
+        print("R2")
+        time.sleep_ms(100)
 
         _fill_solid(buf, width, height, 16, 0, 0)
-        print("before first show")
+        print("R3")
+        time.sleep_ms(100)
         display.show(buf)
-        print("after first show")
+        print("R4")
         time.sleep_ms(delay_ms)
 
         _fill_solid(buf, width, height, 0, 16, 0)
