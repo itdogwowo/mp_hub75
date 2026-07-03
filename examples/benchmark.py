@@ -16,6 +16,8 @@ _FORMAT_MAP = {
     "RGB565": (hub75.RGB565, 2),
     "RGBX8888": (hub75.RGBX8888, 4),
 }
+
+
 def _make_buf(width, height, fmt):
     _, bpp = _FORMAT_MAP[fmt]
     return bytearray(width * height * bpp)
@@ -45,7 +47,29 @@ def _fill_pattern(buf, width, height, fmt, frame):
                 buf[idx + 3] = 0
 
 
-def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M):
+def _fill_sparse(buf, width, height, fmt, r, g, b, step=16):
+    _, bpp = _FORMAT_MAP[fmt]
+    for i in range(len(buf)):
+        buf[i] = 0
+    for y in range(0, height, step):
+        for x in range(0, width, step):
+            idx = (y * width + x) * bpp
+            if fmt == "RGB888":
+                buf[idx] = r
+                buf[idx + 1] = g
+                buf[idx + 2] = b
+            elif fmt == "RGB565":
+                val = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+                buf[idx] = val & 0xFF
+                buf[idx + 1] = (val >> 8) & 0xFF
+            elif fmt == "RGBX8888":
+                buf[idx] = r
+                buf[idx + 1] = g
+                buf[idx + 2] = b
+                buf[idx + 3] = 0
+
+
+def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M, safe_mode=True):
     """Benchmark a single pixel format within one initialized display session."""
     pf, _ = _FORMAT_MAP[fmt]
     print_heap_caps()
@@ -54,7 +78,7 @@ def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M):
         height=height,
         pixel_format=pf,
         clock=clock,
-        safe_mode=True,
+        safe_mode=safe_mode,
         brightness=32,
     )
     print_display_info(display, "benchmark")
@@ -87,12 +111,47 @@ def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M):
     return fps, buf_size
 
 
-def run(width=64, height=32, fmt="RGB888", frames=60, clock=hub75.CLK_8M):
+def benchmark_swap_only(width=64, height=32, fmt="RGB888", frames=300,
+                        clock=hub75.CLK_20M, safe_mode=False, brightness=32, step=16):
+    """Benchmark show()+flip path using two prebuilt buffers."""
+    pf, _ = _FORMAT_MAP[fmt]
+    print_heap_caps()
+    display = get_display(
+        width=width,
+        height=height,
+        pixel_format=pf,
+        clock=clock,
+        safe_mode=safe_mode,
+        brightness=brightness,
+    )
+    print_display_info(display, "swap")
+
+    dark = _make_buf(width, height, fmt)
+    sparse = _make_buf(width, height, fmt)
+    _fill_sparse(sparse, width, height, fmt, 32, 32, 32, step=step)
+
+    print(f"\n--- swap-only {fmt} ({width}x{height}, {clock // 1000000}MHz, safe_mode={safe_mode}) ---")
+    print("Mode: alternate prebuilt dark/sparse buffers, no per-frame pixel generation")
+    display.show(dark)
+    display.show(sparse)
+
+    gc.collect()
+    t0 = time.ticks_us()
+    for frame in range(frames):
+        display.show(sparse if (frame & 1) else dark)
+    elapsed = time.ticks_diff(time.ticks_us(), t0) / 1000000.0
+    fps = frames / elapsed if elapsed > 0 else 0
+    print(f"Swap FPS: {fps:.1f} ({frames} swaps in {elapsed:.3f}s, {elapsed/frames*1000:.1f} ms/swap)")
+    standby_display(0)
+    return fps
+
+
+def run(width=64, height=32, fmt="RGB888", frames=60, clock=hub75.CLK_8M, safe_mode=True):
     """Run one benchmark session. Change format only after reset."""
     print("=" * 50)
     print(f"HUB75 Benchmark — {width}x{height}, {fmt}, {frames} frames")
     print("=" * 50)
-    fps, size = benchmark_single_fmt(width, height, fmt, frames, clock)
+    fps, size = benchmark_single_fmt(width, height, fmt, frames, clock, safe_mode=safe_mode)
     mbps = fps * size / 1024 / 1024
     print("\n" + "=" * 50)
     print("Summary:")
@@ -103,9 +162,34 @@ def run(width=64, height=32, fmt="RGB888", frames=60, clock=hub75.CLK_8M):
     return {fmt: (fps, size)}
 
 
+def run_full_speed(width=64, height=32, fmt="RGB888", frames=300,
+                   clock=hub75.CLK_20M, brightness=32, step=16):
+    """Try the fastest practical swap test. Reboot before changing clock/safe_mode."""
+    print("=" * 50)
+    print(f"HUB75 Full-Speed Swap — {width}x{height}, {fmt}, {frames} swaps")
+    print("=" * 50)
+    fps = benchmark_swap_only(
+        width=width,
+        height=height,
+        fmt=fmt,
+        frames=frames,
+        clock=clock,
+        safe_mode=False,
+        brightness=brightness,
+        step=step,
+    )
+    print("\n" + "=" * 50)
+    print("Summary:")
+    print(f"Format   : {fmt}")
+    print(f"Clock    : {clock // 1000000} MHz")
+    print("SafeMode : False")
+    print(f"Swap FPS : {fps:.1f}")
+    return fps
+
+
 # Run directly as benchmark script
 if __name__ == "__main__":
     try:
-        run()
+        run_full_speed()
     except KeyboardInterrupt:
         print("\nInterrupted.")
