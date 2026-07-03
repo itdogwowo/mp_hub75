@@ -78,6 +78,49 @@ def session_summary():
     return _STATE["config"]
 
 
+def print_heap_caps():
+    try:
+        import heap_caps
+    except Exception as exc:
+        print("heap_caps: unavailable:", exc)
+        return False
+
+    print("heap_caps:")
+    for name, caps in (
+        ("DMA", heap_caps.CAP_DMA),
+        ("INTERNAL", heap_caps.CAP_INTERNAL),
+        ("SPIRAM", heap_caps.CAP_SPIRAM),
+    ):
+        try:
+            free = heap_caps.get_free_size(caps)
+            total = heap_caps.get_total_size(caps)
+            largest = heap_caps.get_largest_free_block(caps)
+            print("  {}: free={} total={} largest={}".format(name, free, total, largest))
+        except Exception as exc:
+            print("  {}: error={}".format(name, exc))
+    return True
+
+
+def print_display_info(display, label="display"):
+    try:
+        status = display.status()
+    except Exception as exc:
+        print("{} status: error={}".format(label, exc))
+        status = None
+    else:
+        print("{} status:".format(label), status)
+
+    try:
+        info = display.buffer_info()
+    except Exception as exc:
+        print("{} buffer_info: error={}".format(label, exc))
+        info = None
+    else:
+        print("{} buffer_info:".format(label), info)
+
+    return status, info
+
+
 def boot_prepare():
     gc.collect()
     return True

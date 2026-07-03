@@ -18,6 +18,7 @@
 #include <driver/periph_ctrl.h>
 #endif
 #include <cstdio>
+#include <cstdlib>
 
 struct Hub75DriverHandle {
     Hub75Config config;
@@ -323,6 +324,41 @@ bool hub75_bridge_show(Hub75DriverHandle* h, const uint8_t* buf, size_t buf_len)
     h->driver->flip_buffer();
     set_stage(h, "idle");
     return true;
+}
+
+bool hub75_bridge_clear(Hub75DriverHandle* h) {
+    if (!h) {
+        return false;
+    }
+    if (!h->driver || !h->started) {
+        return true;
+    }
+
+    size_t blank_len = (size_t)h->config.panel_width * h->config.panel_height;
+    switch (h->pixel_format) {
+        case Hub75PixelFormat::RGB888:
+            blank_len *= 3;
+            break;
+        case Hub75PixelFormat::RGB565:
+            blank_len *= 2;
+            break;
+        case Hub75PixelFormat::RGB888_32:
+            blank_len *= 4;
+            break;
+        default:
+            blank_len *= 3;
+            break;
+    }
+
+    uint8_t *blank = (uint8_t *)calloc(blank_len, 1);
+    if (!blank) {
+        set_error(h, "clear_alloc", "failed to allocate blank frame");
+        return false;
+    }
+
+    bool ok = hub75_bridge_show(h, blank, blank_len);
+    free(blank);
+    return ok;
 }
 
 void hub75_bridge_set_brightness(Hub75DriverHandle* h, uint8_t v) {

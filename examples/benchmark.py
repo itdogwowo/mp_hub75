@@ -9,7 +9,7 @@
 import hub75
 import time
 import gc
-from display_session import get_display, standby_display
+from display_session import get_display, standby_display, print_heap_caps, print_display_info
 
 _FORMAT_MAP = {
     "RGB888": (hub75.RGB888, 3),
@@ -48,6 +48,7 @@ def _fill_pattern(buf, width, height, fmt, frame):
 def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M):
     """Benchmark a single pixel format within one initialized display session."""
     pf, _ = _FORMAT_MAP[fmt]
+    print_heap_caps()
     display = get_display(
         width=width,
         height=height,
@@ -56,6 +57,7 @@ def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M):
         safe_mode=True,
         brightness=32,
     )
+    print_display_info(display, "benchmark")
     buf = _make_buf(width, height, fmt)
     _, bpp = _FORMAT_MAP[fmt]
     buf_size = width * height * bpp
@@ -63,7 +65,6 @@ def benchmark_single_fmt(width, height, fmt, frames=100, clock=hub75.CLK_20M):
     print(f"\n--- {fmt} ({width}x{height}, {clock // 1000000}MHz, {bpp} bytes/px) ---")
     print(f"Buffer size: {buf_size} bytes")
     print("Session mode: one init per boot, reuse the same display object")
-
     info = display.buffer_info()
     per_buffer, _, _, total = info
     print(f"DMA memory: per_buffer={per_buffer}, total={total}")

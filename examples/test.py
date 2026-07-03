@@ -2,7 +2,7 @@ import time
 import machine
 
 import hub75
-from display_session import get_display, standby_display
+from display_session import get_display, standby_display, print_heap_caps, print_display_info
 
 
 def _fill_solid(buf, width, height, r, g, b):
@@ -16,6 +16,7 @@ def safe_start(width=64, height=32):
     """Bring-up with conservative timing and brightness."""
     print("reset_cause:", machine.reset_cause())
     print("hub75 version:", hub75.version())
+    print_heap_caps()
 
     display = get_display(
         width=width,
@@ -25,6 +26,7 @@ def safe_start(width=64, height=32):
         safe_mode=True,
         brightness=1,
     )
+    print_display_info(display, "safe_start")
     buf = bytearray(width * height * 3)
     _fill_solid(buf, width, height, 4, 4, 4)
 
@@ -86,6 +88,7 @@ def _fill_gradient(buf, width, height):
 def run(width=64, height=32, delay_ms=700, brightness=32):
     print("reset_cause:", machine.reset_cause())
     print("hub75 version:", hub75.version())
+    print_heap_caps()
 
     display = get_display(
         width=width,
@@ -95,6 +98,7 @@ def run(width=64, height=32, delay_ms=700, brightness=32):
         safe_mode=True,
         brightness=brightness,
     )
+    print_display_info(display, "run")
     buf = bytearray(width * height * 3)
 
     print("R1")

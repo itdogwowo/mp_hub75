@@ -304,6 +304,11 @@ static mp_obj_t display_make_new(const mp_obj_type_t *type, size_t n_args, size_
         self->width = hub75_bridge_get_width(self->handle);
         self->height = hub75_bridge_get_height(self->handle);
         self->running = hub75_bridge_is_running(self->handle);
+        if (self->running) {
+            // After soft reboot, reuse the live hardware instance but clear any
+            // previously scanned frame to avoid a brief flash of stale content.
+            hub75_bridge_clear(self->handle);
+        }
     } else {
         self->handle = hub75_bridge_create(&cfg);
         if (!self->handle) {
