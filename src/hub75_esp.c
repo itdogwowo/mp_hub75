@@ -40,6 +40,7 @@
 #define CLK_23M 23000000
 #define CLK_27M 27000000
 #define CLK_32M 32000000
+#define CLK_40M 40000000
 
 // ── Display object type ─────────────────────────────────────
 
@@ -651,6 +652,7 @@ static const mp_rom_map_elem_t hub75_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR_CLK_23M), MP_ROM_INT(CLK_23M) },
     { MP_ROM_QSTR(MP_QSTR_CLK_27M), MP_ROM_INT(CLK_27M) },
     { MP_ROM_QSTR(MP_QSTR_CLK_32M), MP_ROM_INT(CLK_32M) },
+    { MP_ROM_QSTR(MP_QSTR_CLK_40M), MP_ROM_INT(CLK_40M) },
 };
 
 static MP_DEFINE_CONST_DICT(mp_module_hub75_globals, hub75_module_globals_table);

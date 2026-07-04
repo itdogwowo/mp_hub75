@@ -78,26 +78,56 @@ def session_summary():
     return _STATE["config"]
 
 
-def print_heap_caps():
+def get_heap_caps_info():
     try:
         import heap_caps
     except Exception as exc:
-        print("heap_caps: unavailable:", exc)
-        return False
+        return {
+            "available": False,
+            "error": str(exc),
+        }
 
-    print("heap_caps:")
+    info = {
+        "available": True,
+    }
     for name, caps in (
         ("DMA", heap_caps.CAP_DMA),
         ("INTERNAL", heap_caps.CAP_INTERNAL),
         ("SPIRAM", heap_caps.CAP_SPIRAM),
     ):
         try:
-            free = heap_caps.get_free_size(caps)
-            total = heap_caps.get_total_size(caps)
-            largest = heap_caps.get_largest_free_block(caps)
-            print("  {}: free={} total={} largest={}".format(name, free, total, largest))
+            info[name] = {
+                "free": heap_caps.get_free_size(caps),
+                "total": heap_caps.get_total_size(caps),
+                "largest": heap_caps.get_largest_free_block(caps),
+            }
         except Exception as exc:
-            print("  {}: error={}".format(name, exc))
+            info[name] = {
+                "error": str(exc),
+            }
+    return info
+
+
+def print_heap_caps():
+    info = get_heap_caps_info()
+    if not info.get("available"):
+        print("heap_caps: unavailable:", info.get("error"))
+        return False
+
+    print("heap_caps:")
+    for name in ("DMA", "INTERNAL", "SPIRAM"):
+        item = info.get(name, {})
+        if "error" in item:
+            print("  {}: error={}".format(name, item["error"]))
+            continue
+        print(
+            "  {}: free={} total={} largest={}".format(
+                name,
+                item.get("free"),
+                item.get("total"),
+                item.get("largest"),
+            )
+        )
     return True
 
 

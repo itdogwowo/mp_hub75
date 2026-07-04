@@ -75,7 +75,10 @@ static Hub75ClockSpeed map_clock_speed(uint32_t hz) {
     if (hz <= 20000000) return Hub75ClockSpeed::HZ_20M;
     if (hz <= 23000000) return Hub75ClockSpeed::HZ_23M;
     if (hz <= 27000000) return Hub75ClockSpeed::HZ_27M;
-    return Hub75ClockSpeed::HZ_32M;
+    if (hz <= 32000000) return Hub75ClockSpeed::HZ_32M;
+    // Upstream uses integer division from PLL_F160M on S3/P4 paths, so 40 MHz
+    // is a clean divider (160 / 4) even though the public enum stops at 32 MHz.
+    return static_cast<Hub75ClockSpeed>(40000000u);
 }
 
 static uint32_t get_bit_depth(void) {
