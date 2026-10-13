@@ -41,9 +41,16 @@ else()
     message(WARNING "esp-hub75 component not found at ${ESP_HUB75_MANAGED_DIR}")
 endif()
 
-# Module strings are not suitable for compression
+# NOTE: MICROPY_ROM_TEXT_COMPRESSION must NOT be defined here. The esp32 port
+# forces it ON (ports/esp32/esp32_common.cmake) and passes -D...=1, while a
+# usermod's INTERFACE definitions are gathered globally by
+# micropy_gather_target_properties() -- so defining it as 0 collides with the
+# port on *every* translation unit. That is a hard error under ESP-IDF v6 (its
+# default is -Werror), and an inconsistent MP_ERROR_TEXT ABI between TUs even
+# when it slips through as a warning on IDF v5. Whether module strings get
+# compressed is a port-level decision, not something a usermod can override for
+# itself alone.
 target_compile_definitions(usermod_mp_hub75 INTERFACE 
-    MICROPY_ROM_TEXT_COMPRESSION=0
     $<$<BOOL:MP_HUB75_DRIVER_VERSION>:MP_HUB75_DRIVER_VERSION=\"${MP_HUB75_DRIVER_VERSION}\">
 )
 
